@@ -1,0 +1,171 @@
+#!/usr/bin/python3
+
+import requests
+import json
+import datetime
+from dataclasses import dataclass
+from terminaltables import SingleTable
+
+API_URL = 'https://ergast.com/api/f1/'
+
+
+def valid_year(year):
+    """
+    This function validate that the given parameter is a valid year
+    :param year
+    :return: True
+    """
+    try:
+        str_tempo = str(year)
+        datetime.datetime.strptime(str_tempo, '%Y')
+        return True
+    except ValueError:
+        print('Incorrect year format, should look like this : 1987')
+        exit()
+
+
+def generate_table_and_print(data, title):
+    table = SingleTable(data)
+    print(' ')
+    print(f'\x1b[1;0;45m {title} \x1b[0m')
+    print(table.table)
+    print(' ')
+
+
+def generate_full_name(driver):
+    return f"{driver['givenName']} {driver['familyName']}"
+
+
+@dataclass
+class Race:
+    id: int
+    name: str
+    circuit_name: str
+    winner: str
+    date: str
+
+
+@dataclass
+class DriverStanding:
+    drivers: list
+    total_driver: int
+
+
+@dataclass
+class ConstructorStanding:
+    constructors: list
+    total_constructor: int
+
+
+def generate_race_dataclasses(race_table):
+    races_dataclasses = []
+    for races in race_table:
+        races_dataclasses.append(
+            Race(
+                int(races['round']),
+                races['raceName'],
+                races['Circuit']['circuitName'],
+                generate_full_name(races['Results'][0]['Driver']),
+                races['date']
+            )
+        )
+    return races_dataclasses
+
+
+def generate_driver_standing_dataclasses(standing_table):
+    standing_list = []
+    for driver in standing_table:
+        standing_list.append(
+            {
+                'position': driver['position'],
+                'name': generate_full_name(driver['Driver']),
+                'points': driver['points'],
+                'wins': driver['wins']
+            }
+        )
+    return DriverStanding(standing_list, len(standing_table))
+
+
+def generate_constructor_standing_dataclasses(standing_table):
+    standing_list = []
+    for constructor in standing_table:
+        standing_list.append(
+            {
+                'position': constructor['position'],
+                'name': constructor['Constructor']['name'],
+                'points': constructor['points'],
+                'wins': constructor['wins']
+            }
+        )
+    return ConstructorStanding(standing_list, len(standing_table))
+
+
+class RaceSeason:
+    """
+    This class is used in order to manipulate a race season
+    """
+    def __init__(self, year):
+        if valid_year(year):
+            self.year = year
+            raw_data = requests.get(f'{API_URL}{self.year}/results.json?limit=420')
+            self.results_json = json.loads(raw_data.content)
+            self.race_table = self.results_json['MRData']['RaceTable']['Races']
+            self.results_table = []
+            for race in self.results_json['MRData']['RaceTable']['Races']:
+                self.results_table.append(race['Results'])
+
+    def list_races(self):
+        title = f'{self.year} Season'
+        data = [['Round', 'Grand Prix', 'Circuit', 'Winner', 'Date']]
+        for race in generate_race_dataclasses(self.race_table):
+            data.append([
+                race.id,
+                race.name,
+                race.circuit_name,
+                race.winner,
+                race.date
+            ])
+        generate_table_and_print(data, title)
+
+    def list_driver_standing(self):
+        title = f'{self.year} Driver Standing'
+        url = f'{API_URL}{self.year}/driverStandings.json?limit=150'
+        standing_request = requests.get(url)
+        standing_json = json.loads(standing_request.content)
+        standing_dataclasse = generate_driver_standing_dataclasses(
+            standing_json['MRData']['StandingsTable']['StandingsLists'][0]['DriverStandings']
+        )
+        data = [['Position', 'Name', 'Points', 'Wins']]
+        for driver in standing_dataclasse.drivers:
+            data.append([
+                driver['position'],
+                driver['name'],
+                driver['points'],
+                driver['wins']
+            ])
+        generate_table_and_print(data, title)
+
+    def list_constructor_standing(self):
+        title = f'{self.year} Constructor Standing'
+        url = f'{API_URL}{self.year}/constructorStandings.json?limit=150'
+        standing_request = requests.get(url)
+        standing_json = json.loads(standing_request.content)
+        standing_dataclasse = generate_constructor_standing_dataclasses(
+            standing_json['MRData']['StandingsTable']['StandingsLists'][0]['ConstructorStandings']
+        )
+        data = [['Position', 'Name', 'Points', 'Wins']]
+        for constructor in standing_dataclasse.constructors:
+            data.append([
+                constructor['position'],
+                constructor['name'],
+                constructor['points'],
+                constructor['wins']
+            ])
+        generate_table_and_print(data, title)
+
+
+if __name__ == "__main__":
+    season = RaceSeason(datetime.date.today().year)
+    season.list_races()
+
+
